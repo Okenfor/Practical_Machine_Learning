@@ -1,0 +1,136 @@
+---
+title: 'Practical Machine Learning Project: Weight Lifting Exercises'
+author: "paperezq"
+date: "Tuesday, May 19, 2015"
+output: html_document
+---
+
+#Introduction
+
+This report relates the project of classifying activities in weight lifting exercises. Its aim is to classify mistakes in predicting activities based on some measures in data collected. The first part of this report is the data analysis making some summarizes in order to get sense of data we´re dealing on. Next, data is splitted aiming for to make cross validation of the classifying models. Finally, models are built based on preprocessed data and some conclusions are elucidated.
+
+This work takes dataset and guidelines from the following study: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Website: http://groupware.les.inf.puc-rio.br/har
+
+
+```{r, echo=FALSE}
+setwd("~/Workspace/R")
+library(caret)
+
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml_training.csv")
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml_testing.csv")
+train_data <- read.csv("pml_training.csv",na.strings=c("NA",""), header=TRUE)
+test_data <- read.csv("pml_testing.csv",na.strings=c("NA",""), header=TRUE)
+```
+
+#Exploratory Data Analysis
+
+Data is sumarized and we see that most of the variables have NAs values which are unusefull for the model.
+
+
+```{r, echo=TRUE}
+#Exploratory Data Analysis
+#Sumarize each data set
+summary(train_data)
+summary(test_data)
+
+#verifying if test set has the same columns as train set
+colnames_train <- colnames(train_data)
+colnames_test <- colnames(test_data)
+all.equal(colnames_train[1:length(colnames_train)-1], colnames_test[1:length(colnames_train)-1])
+
+#Preprocess
+#Remove columns that have more than 40% of empty values and those first that are innecessary.
+train_data <- train_data[,!(colMeans(is.na(train_data)) >= .4)]
+train_data <- train_data[,-c(1:7)]
+test_data <- test_data[,colnames(train_data[,-53])]
+
+dim(train_data)
+dim(test_data)
+```
+
+At the end, after removing columns that have a 40% incomplete data or more, we check if the covariates have virtually no variability and thus drop columns in that case.
+
+```{r}
+#First, check for covariates that have virtually no variablility.
+nsv <- nearZeroVar(train_data, saveMetrics=TRUE)
+nsv
+```
+
+Given that all of the near zero variance variables (nsv) are FALSE, there's no need to eliminate any covariates due to lack of variablility.
+
+#Building models
+
+The choice of the method was considering the expected out of sample error in which we expect an accuracy of 90%. The following code shows how data is splitted into three data sets. The first one contain the 60% of data selected randomly. Next, we have a data set in which a model will be tested but just to ajust de Bias and Variance in order to avoid overfitting. The third data set is the real test set in which de final model is tested before it is applied to new data.
+
+```{r, echo=TRUE}
+set.seed(975)
+
+inTrain = createDataPartition(train_data$classe, p = 0.6)[[1]]
+training = train_data[ inTrain,]
+remaining = train_data[-inTrain,]
+inCross = createDataPartition(remaining$classe, p = 0.5)[[1]]
+crossing = remaining[inCross,]
+testing = remaining[-inCross,]
+```
+
+Before we apply any algorithm, data is normalized.
+```{r}
+#Center and Scale
+preObj <- preProcess(training[,-53],method=c("center","scale"))
+trainCS <- data.frame(predict(preObj,training[,-53]),training[53])
+crossCS <- data.frame(predict(preObj,crossing[,-53]),crossing[53])
+testCS <- data.frame(predict(preObj,testing[,-53]),testing[53])
+```
+
+The algorithms used were rpart or classification tree and random forest. In the last two, we used  cross validation up to 6 times as training control.
+
+```{r, echo=TRUE}
+##TREE
+modelFit1 <- train(classe ~ ., method="rpart", data=trainCS)
+modelFit1 <- readRDS("modelFit1.rds")
+print(modelFit1, digits = 4)
+#saveRDS(modelFit1, "modelFit1.rds") 
+
+predictionsCross1 <- predict(modelFit1, newdata = crossCS)
+print(confusionMatrix(predictionsCross1, crossCS$classe), digits=4)
+
+predictionsTest1  <- predict(modelFit1, newdata = testCS)
+print(confusionMatrix(predictionsTest1, testCS$classe), digits=4)
+
+#Random Forest
+#modelFit2 <- train(classe ~ ., method="rf", trControl=trainControl(method = "cv", number = 4), data=trainCS)
+modelFit2 <- readRDS("modelFit2.rds")
+print(modelFit2, digits = 4)
+#saveRDS(modelFit2, "modelFit2.rds") 
+
+predictionsCross2 <- predict(modelFit2, newdata = crossCS)
+print(confusionMatrix(predictionsCross2, crossCS$classe), digits=4)
+
+predictionsTest2 <- predict(modelFit2, newdata = testCS)
+print(confusionMatrix(predictionsTest2, testCS$classe), digits=4)
+
+#TREE 2
+#modelFit3 <- train(classe ~ ., method="rpart2", trControl=trainControl(method = "cv", number = 6), data=trainCS)
+modelFit3 <- readRDS("modelFit3.rds")
+print(modelFit3, digits = 4)
+#saveRDS(modelFit3, "modelFit3.rds") 
+
+predictionsCross3 <- predict(modelFit3, newdata = crossCS)
+print(confusionMatrix(predictionsCross3, crossCS$classe), digits=4)
+
+predictionsTest3 <- predict(modelFit3, newdata = testCS)
+print(confusionMatrix(predictionsTest3, testCS$classe), digits=4)
+```
+
+Using accuracy as a performance measure for methods above, we finally select the model created by a random forest because it reach an accuracy of almost 98%, more than the other.
+
+#Testing over new data, unknown
+
+Finally, the model is executed over a new sample of 20 registers.
+
+```{r}
+predictionTestFinal <- predict(modelFit2, newdata = test_data)
+predictionTestFinal
+```
